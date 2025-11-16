@@ -50,5 +50,6 @@ The following sections document the fulfillment of the expanded project requirem
 
 ---
 
-**Full command-line workflow and all raw output are detailed in:** `docs/network-forensics-output.txt`
+**Full command-line workflow and all raw output are detailed in:**
 
+ [docs/network-forensics-output.txt](docs/network-forensics-output.txt)
