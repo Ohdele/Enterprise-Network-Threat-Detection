@@ -1,0 +1,48 @@
+
+# 2. Network Environment Setup (IP Addresses)
+dele@VPNSERVER:~/Enterprise-Network-Threat-Detection$ ip a | grep 'inet ' | grep -v 127.0.0.1
+    inet 172.20.10.2/28 brd 172.20.10.15 scope global dynamic noprefixroute enp0s3
+    inet 192.168.10.11/24 brd 192.168.10.255 scope global noprefixroute enp0s8
+    inet 10.8.0.1/24 scope global tun0
+
+# --- Action on Client VM (Victim/Target) ---
+dele@dele-VirtualBox:~$ ip a | grep 'inet ' | grep -v 127.0.0.1
+    inet 10.0.2.15/24 brd 10.0.2.255 scope global dynamic noprefixroute enp0s3
+    inet 192.168.10.20/24 brd 192.168.10.255 scope global noprefixroute enp0s8
+
+# Environment Variables for Simulation:
+# ATTACKER_IP: 192.168.10.11 (VPN Server)
+# TARGET_IP: 192.168.10.20 (Client Server)
+# GATEWAY_IP: 192.168.10.1 (Assumed)
+
+
+# 3. ARP Poisoning and Credential Sniffing (Lab 4 & 5)
+
+## 3.1 Packet Capture Summary
+# Attack: ARP Poisoning between 192.168.10.20 and 192.168.10.1 using Ettercap.
+# Capture: TShark captured all traffic to /root/attack_traffic.pcap.
+
+## 3.2 Credential Extraction
+dele@VPNSERVER:~/Enterprise-Network-Threat-Detection$ sudo tshark -r /root/attack_traffic.pcap -Y 'frame.number == 14' -x
+# ... (Output omitted for brevity) ...
+0040  ca 56 55 53 45 52 20 74 65 73 74 65 72 0d 0a    .VUSER tester..
+
+# Credentials captured in plaintext (Packet 14):
+# Username: tester (Sent: USER tester)
+# The password 'insecure123' was not successfully sent before the connection closed.
+
+
+# 4. Intrusion Detection (Lab 6)
+
+## 4.1 ARP Spoofing Detection
+# Tool: ip neigh show (on Client/Victim)
+# The ARP poisoning attack is detected by observing the Client's ARP cache (ip neigh show) for an incorrect MAC address mapping.
+
+# Expected Spoofed Entry (Gateway 192.168.10.1):
+# The IP 192.168.10.1 should map to the VPN Server's MAC address (08:00:27:a1:6c:2a), instead of the true Gateway MAC.
+
+# Expected ip neigh show (on Client, while under attack):
+# 192.168.10.1 dev enp0s8 lladdr 08:00:27:a1:6c:2a STALE
+
+# The lack of visible ARP poisoning packets in tcpdump and the failure of ip neigh show to update indicates a possible VirtualBox networking or Ettercap initialization issue, but the detection method remains valid.
+
