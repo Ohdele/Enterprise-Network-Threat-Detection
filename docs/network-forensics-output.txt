@@ -1,6 +1,132 @@
+
 # 1. Project Initialization and Setup
 
 # 2. Network Environment Setup (IP Addresses)
+
+## [VPN SERVER (Attacker)]
 dele@VPNSERVER:~/Enterprise-Network-Threat-Detection$ ip a | grep 'inet ' | grep -v 127.0.0.1
-... (Paste all existing content here) ...
+    inet 172.20.10.2/28 brd 172.20.10.15 scope global dynamic noprefixroute enp0s3
+    inet 192.168.10.11/24 brd 192.168.10.255 scope global noprefixroute enp0s8
+    inet 10.8.0.1/24 scope global tun0
+
+## [CLIENT SERVER (Victim)]
+dele@dele-VirtualBox:~$ ip a | grep 'inet ' | grep -v 127.0.0.1
+    inet 10.0.2.15/24 brd 10.0.2.255 scope global dynamic noprefixroute enp0s3
+    inet 192.168.10.20/24 brd 192.168.10.255 scope global noprefixroute enp0s8
+
+# Environment Variables for Simulation:
+# ATTACKER_IP: 192.168.10.11 (VPN Server)
+# TARGET_IP: 192.168.10.20 (Client Server)
+# GATEWAY_IP: 192.168.10.1 (Assumed)
+
+
+# 3. ARP Poisoning and Credential Sniffing (Lab 4 & 5)
+
+## 3.1 Packet Capture Summary
+# Attack: ARP Poisoning between 192.168.10.20 and 192.168.10.1 using Ettercap.
+# Capture: TShark captured all traffic to /root/attack_traffic.pcap.
+
+## 3.2 Credential Extraction
+
+# VPN SERVER (Terminal 2 - TShark Analysis):
+dele@VPNSERVER:~/Enterprise-Network-Threat-Detection$ sudo tshark -r /root/attack_traffic.pcap -Y 'frame.number == 14' -x
+# ... (Hex dump lines omitted for brevity) ...
+0040  ca 56 55 53 45 52 20 74 65 73 74 65 72 0d 0a     .VUSER tester..
+
+# Credentials captured in plaintext (Packet 14):
+# Username: tester (Sent: USER tester)
+# The password 'insecure123' was not successfully sent before the connection closed.
+
+
+# 4. Intrusion Detection (Lab 6)
+
+## 4.1 ARP Spoofing Detection
+# Tool: ip neigh show (on Client/Victim)
+# The ARP poisoning attack is detected by observing the Client's ARP cache (ip neigh show) for an incorrect MAC address mapping.
+
+# Expected Spoofed Entry (Gateway 192.168.10.1):
+# The IP 192.168.10.1 should map to the VPN Server's MAC address (08:00:27:a1:6c:2a), instead of the true Gateway MAC.
+
+# Expected ip neigh show (on Client, while under attack):
+# 192.168.10.1 dev enp0s8 lladdr 08:00:27:a1:6c:2a STALE
+
+# The lack of visible ARP poisoning packets in tcpdump and the failure of ip neigh show to update indicates a possible VirtualBox networking or Ettercap initialization issue, but the detection method remains valid.
+
+
+# 5. Protocol Analysis and Traffic Generation (DNS, HTTP, SMTP)
+
+## 5.1 DNS Traffic Capture and Analysis
+
+# VPN SERVER (Terminal 1 - TShark Capture Launch):
+# sudo tshark -i enp0s8 -w /root/dns_traffic.pcap 'port 53'
+
+# CLIENT SERVER (Traffic Generation):
+# To bypass local resolver cache and ensure traffic crossed the wire:
+dele@dele-VirtualBox:~$ dig @8.8.8.8 google.com
+# ... (Output showing query to 8.8.8.8) ...
+
+# VPN SERVER (Terminal 2 - TShark Analysis):
+dele@VPNSERVER:~/Enterprise-Network-Threat-Detection$ sudo tshark -r /root/dns_traffic.pcap -Y dns -T fields -e dns.qry.name -e dns.a
+# Output was empty, indicating packets were not captured/saved successfully on enp0s8.
+
+# Expected DNS Analysis Output:
+# google.com.	216.58.223.238
+
+# Finding: DNS is transmitted in plaintext, exposing the requested domain (google.com) to network monitoring.
+
+## 5.2 HTTP Traffic Capture and Analysis
+
+# VPN SERVER (Terminal 1 - TShark Capture Launch):
+# sudo tshark -i enp0s8 -w /root/http_traffic.pcap 'port 80'
+
+# CLIENT SERVER (Traffic Generation):
+dele@dele-VirtualBox:~$ curl http://192.168.10.11/
+# ... (HTML output from Apache Default Page) ...
+
+# VPN SERVER (Terminal 2 - TShark Analysis):
+dele@VPNSERVER:~/Enterprise-Network-Threat-Detection$ sudo tshark -r /root/http_traffic.pcap -Y 'http.request or http.response' -T fields -e http.request.full_uri -e http.response.code
+http://192.168.10.11/	
+    200
+
+# Finding: HTTP traffic is sent in plaintext, revealing the requested URL and the server's full response (200 OK) to anyone monitoring the network.
+
+## 5.3 SMTP Traffic Capture and Analysis
+
+# VPN SERVER (Terminal 1 - TShark Capture Launch):
+# sudo tshark -i enp0s8 -w /root/smtp_traffic.pcap 'port 25'
+
+# CLIENT SERVER (Traffic Generation using Netcat):
+dele@dele-VirtualBox:~$ echo -e "HELO client.com\nMAIL FROM: test@client.com\nRCPT TO: monitor@vpnserver.com\nDATA\nSubject: Test Email\n\nThis is a plaintext test.\n.\nQUIT" | nc 192.168.10.11 25
+dele@dele-VirtualBox:~$
+
+# VPN SERVER (Terminal 2 - TShark Analysis - Basic Commands):
+dele@VPNSERVER:~/Enterprise-Network-Threat-Detection$ sudo tshark -r /root/smtp_traffic.pcap -Y 'smtp' -T fields -e smtp.req.command
+Running as user "root" and group "root". This could be dangerous.
+dele@VPNSERVER:~/Enterprise-Network-Threat-Detection$
+
+# Finding: No SMTP requests were captured in the pcap. This may indicate no SMTP traffic was generated or successfully captured during the experiment due to the connection failing immediately after the Client's nc command executed.
+
+# Conclusion of Protocol Analysis (DNS, HTTP, SMTP):
+# HTTP and (expected) DNS/SMTP communications transmit data in plaintext, exposing sensitive information (URLs, domains, email metadata, and content) to network monitoring.
+
+
+# 6. Detection of Suspicious Behavior
+
+## 6.1 Simulation of Anomalous/High-Port Traffic
+
+# VPN SERVER (Terminal 1 - TShark Capture Launch):
+# sudo tshark -i enp0s8 -w /root/anomalous_traffic.pcap
+
+# CLIENT SERVER (Traffic Generation - Anomalous Connection Attempt):
+dele@dele-VirtualBox:~$ nc -vz 192.168.10.11 44444
+nc: connect to 192.168.10.11 port 44444 (tcp) failed: Connection refused
+dele@dele-VirtualBox:~$
+
+# VPN SERVER (Terminal 2 - TShark Analysis):
+dele@VPNSERVER:~/Enterprise-Network-Threat-Detection$ sudo tshark -r /root/anomalous_traffic.pcap -Y 'tcp.port == 44444' -T fields -e ip.src -e ip.dst -e tcp.flags
+Running as user "root" and group "root". This could be dangerous.
+192.168.10.20	192.168.10.11	0x0002
+192.168.10.11	192.168.10.20	0x0014
+
 # Finding: A suspicious connection attempt from 192.168.10.20 to a high, non-standard port (44444) on 192.168.10.11 was captured. The packet analysis shows a TCP SYN (0x0002) followed by a RST, ACK (0x0014), confirming a connection refusal. This is an indicator of reconnaissance, beaconing, or anomalous lateral movement often flagged by intrusion detection systems.
+
